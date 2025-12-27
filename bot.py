@@ -63,7 +63,7 @@ def get_pull_request_diff(pr_number: int, api_token: str) -> str:
         raise BotError(f"Failed to fetch pull request diff: {e}")
 
 
-def send_to_openrouter(diff: str, api_token: str, model: str = DEFAULT_MODEL) -> dict:
+def send_to_openrouter(diff: str, api_token: str, model: str = DEFAULT_MODEL, verbose: bool = False) -> dict:
     """
     Send the diff to OpenRouter API for code review.
 
@@ -71,6 +71,7 @@ def send_to_openrouter(diff: str, api_token: str, model: str = DEFAULT_MODEL) ->
         diff: The pull request diff content
         api_token: OpenRouter API token
         model: The model to use (default: z-ai/glm-4.7)
+        verbose: If True, print detailed response information
 
     Returns:
         Parsed JSON response from OpenRouter
@@ -106,8 +107,11 @@ def send_to_openrouter(diff: str, api_token: str, model: str = DEFAULT_MODEL) ->
     try:
         with urllib.request.urlopen(req) as response:
             response_data = response.read().decode('utf-8')
-            print("Success! Response:")
-            print(json.dumps(json.loads(response_data), indent=2))
+            if verbose:
+                print("Success! Response:")
+                print(json.dumps(json.loads(response_data), indent=2))
+            else:
+                print("Successfully sent diff to OpenRouter for review")
             return json.loads(response_data)
     except urllib.error.HTTPError as e:
         error_body = e.read().decode('utf-8')
@@ -118,7 +122,7 @@ def send_to_openrouter(diff: str, api_token: str, model: str = DEFAULT_MODEL) ->
         raise BotError(f"Failed to parse JSON response: {e}")
 
 
-def add_comment_to_issue(issue_number: int, review_text: str, cost: str, api_token: str) -> dict:
+def add_comment_to_issue(issue_number: int, review_text: str, cost: str, api_token: str, verbose: bool = False) -> dict:
     """
     Post the review as a comment to an issue.
 
@@ -127,6 +131,7 @@ def add_comment_to_issue(issue_number: int, review_text: str, cost: str, api_tok
         review_text: The review content from OpenRouter
         cost: The cost information from OpenRouter response
         api_token: Gitea API token for authentication
+        verbose: If True, print detailed response information
 
     Returns:
         Parsed JSON response from Gitea
@@ -154,17 +159,21 @@ def add_comment_to_issue(issue_number: int, review_text: str, cost: str, api_tok
             response_status = response.status
             response_headers = dict(response.getheaders())
 
-            print(f"Status: {response_status}")
-            print("Response headers:")
-            for key, value in response_headers.items():
-                print(f"  {key}: {value}")
-            print("\nResponse body:")
-            print(response_body)
+            if verbose:
+                print(f"Status: {response_status}")
+                print("Response headers:")
+                for key, value in response_headers.items():
+                    print(f"  {key}: {value}")
+                print("\nResponse body:")
+                print(response_body)
 
             try:
                 json_response = json.loads(response_body)
-                print("\nParsed JSON response:")
-                print(json.dumps(json_response, indent=2))
+                if verbose:
+                    print("\nParsed JSON response:")
+                    print(json.dumps(json_response, indent=2))
+                else:
+                    print(f"Successfully posted review comment to issue #{issue_number}")
                 return json_response
             except json.JSONDecodeError:
                 return {"raw_response": response_body}
@@ -210,6 +219,11 @@ def main() -> None:
         default=DEFAULT_MODEL,
         help=f'OpenRouter model to use (default: {DEFAULT_MODEL})'
     )
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Print detailed response information'
+    )
 
     args = parser.parse_args()
 
@@ -222,14 +236,14 @@ def main() -> None:
         diff = get_pull_request_diff(args.pr_number, gitea_token)
 
         # Send to OpenRouter for review
-        response = send_to_openrouter(diff, openrouter_token, args.model)
+        response = send_to_openrouter(diff, openrouter_token, args.model, args.verbose)
 
         # Extract review and cost
         review_text = response["choices"][0]["message"]["content"]
         cost = response["usage"]["cost"]
 
         # Add comment to issue
-        add_comment_to_issue(args.issue_number, review_text, cost, gitea_token)
+        add_comment_to_issue(args.issue_number, review_text, cost, gitea_token, args.verbose)
 
     except BotError as e:
         handle_error(e, "bot operation")
