@@ -60,7 +60,7 @@ type Choice struct {
 
 // Usage represents usage information in the OpenRouter response
 type Usage struct {
-	Cost string `json:"cost"`
+	Cost float64 `json:"cost"`
 }
 
 // GiteaCommentRequest represents the request payload for Gitea comment API
@@ -177,11 +177,11 @@ func SendToOpenRouter(diff, apiToken, model string, verbose bool) (*OpenRouterRe
 }
 
 // AddCommentToIssue posts the review as a comment to an issue
-func AddCommentToIssue(issueNumber int, reviewText, cost, apiToken string, verbose bool) (map[string]interface{}, error) {
+func AddCommentToIssue(issueNumber int, reviewText string, cost float64, apiToken string, verbose bool) (map[string]interface{}, error) {
 	url := fmt.Sprintf("%s/issues/%d/comments", GiteaBaseURL, issueNumber)
 
 	payload := GiteaCommentRequest{
-		Body: fmt.Sprintf("Review:\n%s\nCost:%s", reviewText, cost),
+		Body: fmt.Sprintf("Review:\n%s\nCost:%f", reviewText, cost),
 	}
 
 	jsonData, err := json.Marshal(payload)
