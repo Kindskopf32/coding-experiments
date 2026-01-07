@@ -6,7 +6,7 @@ import json
 
 
 # Constants
-GITEA_BASE_URL = 'https://gitea.mavolk.de/api/v1/repos/max/misc'
+GITEA_BASE_URL = 'https://gitea.mavolk.de/api/v1/repos/max/python-rq-encoding'
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "z-ai/glm-4.7"
 
