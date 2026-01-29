@@ -167,3 +167,73 @@ impl Database {
         Ok(has_jobs)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    fn create_test_job() -> Job {
+        Job {
+            id: Uuid::new_v4(),
+            status: "pending".to_string(),
+            input_path: "/input.mp4".to_string(),
+            output_path: "/output.mp4".to_string(),
+            video_codec: "libx264".to_string(),
+            preset: "medium".to_string(),
+            crf: 23,
+            error_message: None,
+            created_at: Utc::now(),
+            started_at: None,
+            completed_at: None,
+        }
+    }
+
+    #[test]
+    fn test_job_creation() {
+        let job = create_test_job();
+
+        assert_eq!(job.input_path, "/input.mp4");
+        assert_eq!(job.output_path, "/output.mp4");
+        assert_eq!(job.status, "pending");
+        assert_eq!(job.video_codec, "libx264");
+        assert_eq!(job.preset, "medium");
+        assert_eq!(job.crf, 23);
+        assert!(job.error_message.is_none());
+        assert!(job.started_at.is_none());
+        assert!(job.completed_at.is_none());
+    }
+
+    #[test]
+    fn test_job_with_error() {
+        let mut job = create_test_job();
+        job.status = "failed".to_string();
+        job.error_message = Some("FFmpeg error".to_string());
+
+        assert_eq!(job.status, "failed");
+        assert_eq!(job.error_message, Some("FFmpeg error".to_string()));
+    }
+
+    #[test]
+    fn test_job_processing_state() {
+        let mut job = create_test_job();
+        job.status = "processing".to_string();
+        job.started_at = Some(Utc::now());
+
+        assert_eq!(job.status, "processing");
+        assert!(job.started_at.is_some());
+    }
+
+    #[test]
+    fn test_job_completed_state() {
+        let mut job = create_test_job();
+        job.status = "done".to_string();
+        job.started_at = Some(Utc::now());
+        job.completed_at = Some(Utc::now());
+
+        assert_eq!(job.status, "done");
+        assert!(job.started_at.is_some());
+        assert!(job.completed_at.is_some());
+    }
+}

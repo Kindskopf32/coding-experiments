@@ -34,3 +34,106 @@ pub enum Commands {
         burst: bool,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_cli_add_command() {
+        let args = vec!["encode", "add", "/input.mp4", "/output.mp4"];
+        let cli = Cli::parse_from(args);
+
+        match cli.command {
+            Commands::Add {
+                input,
+                output,
+                codec,
+                preset,
+                crf,
+            } => {
+                assert_eq!(input, PathBuf::from("/input.mp4"));
+                assert_eq!(output, PathBuf::from("/output.mp4"));
+                assert!(codec.is_none());
+                assert!(preset.is_none());
+                assert!(crf.is_none());
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_add_with_options() {
+        let args = vec![
+            "encode",
+            "add",
+            "/input.mp4",
+            "/output.mp4",
+            "--codec",
+            "libx265",
+            "--preset",
+            "slow",
+            "--crf",
+            "18",
+        ];
+        let cli = Cli::parse_from(args);
+
+        match cli.command {
+            Commands::Add {
+                input,
+                output,
+                codec,
+                preset,
+                crf,
+            } => {
+                assert_eq!(input, PathBuf::from("/input.mp4"));
+                assert_eq!(output, PathBuf::from("/output.mp4"));
+                assert_eq!(codec, Some("libx265".to_string()));
+                assert_eq!(preset, Some("slow".to_string()));
+                assert_eq!(crf, Some(18));
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_worker_command() {
+        let args = vec!["encode", "worker"];
+        let cli = Cli::parse_from(args);
+
+        match cli.command {
+            Commands::Worker { burst } => {
+                assert!(!burst);
+            }
+            _ => panic!("Expected Worker command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_worker_burst_mode() {
+        let args = vec!["encode", "worker", "--burst"];
+        let cli = Cli::parse_from(args);
+
+        match cli.command {
+            Commands::Worker { burst } => {
+                assert!(burst);
+            }
+            _ => panic!("Expected Worker command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_worker_burst_short_flag() {
+        let args = vec!["encode", "worker", "-b"];
+        let cli = Cli::parse_from(args);
+
+        match cli.command {
+            Commands::Worker { burst } => {
+                assert!(burst);
+            }
+            _ => panic!("Expected Worker command"),
+        }
+    }
+}

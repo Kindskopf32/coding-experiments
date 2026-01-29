@@ -67,3 +67,74 @@ impl FfmpegRunner {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    fn create_test_job(input: &str, output: &str) -> Job {
+        Job {
+            id: Uuid::new_v4(),
+            status: "pending".to_string(),
+            input_path: input.to_string(),
+            output_path: output.to_string(),
+            video_codec: "libx264".to_string(),
+            preset: "medium".to_string(),
+            crf: 23,
+            error_message: None,
+            created_at: Utc::now(),
+            started_at: None,
+            completed_at: None,
+        }
+    }
+
+    #[test]
+    fn test_ffmpeg_runner_new() {
+        let runner = FfmpegRunner::new("/usr/bin/ffmpeg");
+        assert_eq!(runner.ffmpeg_path, "/usr/bin/ffmpeg");
+    }
+
+    #[test]
+    fn test_ffmpeg_runner_new_from_string() {
+        let path = String::from("/opt/ffmpeg");
+        let runner = FfmpegRunner::new(path);
+        assert_eq!(runner.ffmpeg_path, "/opt/ffmpeg");
+    }
+
+    #[tokio::test]
+    async fn test_transcode_missing_input_file() {
+        let runner = FfmpegRunner::new("ffmpeg");
+        let job = create_test_job("/nonexistent/path/input.mp4", "/output.mp4");
+
+        let result = runner.transcode(&job).await;
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Input file not found"));
+    }
+
+    #[test]
+    fn test_job_structure() {
+        let job = create_test_job("/input.mp4", "/output.mp4");
+        
+        assert_eq!(job.input_path, "/input.mp4");
+        assert_eq!(job.output_path, "/output.mp4");
+        assert_eq!(job.video_codec, "libx264");
+        assert_eq!(job.preset, "medium");
+        assert_eq!(job.crf, 23);
+        assert!(job.error_message.is_none());
+    }
+
+    #[test]
+    fn test_job_with_custom_settings() {
+        let mut job = create_test_job("/input.mp4", "/output.mp4");
+        job.video_codec = "libx265".to_string();
+        job.preset = "slow".to_string();
+        job.crf = 18;
+
+        assert_eq!(job.video_codec, "libx265");
+        assert_eq!(job.preset, "slow");
+        assert_eq!(job.crf, 18);
+    }
+}
