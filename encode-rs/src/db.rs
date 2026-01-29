@@ -30,7 +30,12 @@ impl Database {
             .connect(database_url)
             .await?;
 
-        // Run migrations
+        // Run migrations - suppress NOTICE messages to avoid "relation already exists" spam
+        let mut tx = pool.begin().await?;
+        sqlx::query("SET LOCAL client_min_messages = WARNING")
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
         sqlx::migrate!("./migrations").run(&pool).await?;
 
         Ok(Self { pool })
