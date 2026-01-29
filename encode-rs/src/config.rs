@@ -18,6 +18,7 @@ pub struct DatabaseConfig {
 #[derive(Debug, Deserialize)]
 pub struct FfmpegConfig {
     pub path: String,
+    pub ffprobe_path: String,
     pub default_codec: String,
     pub default_preset: String,
     pub default_crf: i32,
@@ -54,6 +55,7 @@ url = "postgres://user:pass@localhost/test_db"
 
 [ffmpeg]
 path = "/usr/bin/ffmpeg"
+ffprobe_path = "/usr/bin/ffprobe"
 default_codec = "libx264"
 default_preset = "medium"
 default_crf = 23
@@ -69,6 +71,7 @@ poll_interval_seconds = 5
             "postgres://user:pass@localhost/test_db"
         );
         assert_eq!(config.ffmpeg.path, "/usr/bin/ffmpeg");
+        assert_eq!(config.ffmpeg.ffprobe_path, "/usr/bin/ffprobe");
         assert_eq!(config.ffmpeg.default_codec, "libx264");
         assert_eq!(config.ffmpeg.default_preset, "medium");
         assert_eq!(config.ffmpeg.default_crf, 23);
@@ -83,6 +86,7 @@ url = "postgres://admin:secret@db.example.com/production"
 
 [ffmpeg]
 path = "/opt/ffmpeg/bin/ffmpeg"
+ffprobe_path = "/opt/ffmpeg/bin/ffprobe"
 default_codec = "libx265"
 default_preset = "slow"
 default_crf = 18
@@ -98,6 +102,7 @@ poll_interval_seconds = 30
             "postgres://admin:secret@db.example.com/production"
         );
         assert_eq!(config.ffmpeg.path, "/opt/ffmpeg/bin/ffmpeg");
+        assert_eq!(config.ffmpeg.ffprobe_path, "/opt/ffmpeg/bin/ffprobe");
         assert_eq!(config.ffmpeg.default_codec, "libx265");
         assert_eq!(config.ffmpeg.default_preset, "slow");
         assert_eq!(config.ffmpeg.default_crf, 18);

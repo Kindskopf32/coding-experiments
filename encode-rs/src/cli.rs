@@ -32,6 +32,9 @@ pub enum Commands {
         /// Exit when no more jobs (burst mode)
         #[arg(short, long)]
         burst: bool,
+        /// Show encoding progress
+        #[arg(long)]
+        progress: bool,
     },
 }
 
@@ -104,8 +107,9 @@ mod tests {
         let cli = Cli::parse_from(args);
 
         match cli.command {
-            Commands::Worker { burst } => {
+            Commands::Worker { burst, progress } => {
                 assert!(!burst);
+                assert!(!progress);
             }
             _ => panic!("Expected Worker command"),
         }
@@ -117,8 +121,9 @@ mod tests {
         let cli = Cli::parse_from(args);
 
         match cli.command {
-            Commands::Worker { burst } => {
+            Commands::Worker { burst, progress } => {
                 assert!(burst);
+                assert!(!progress);
             }
             _ => panic!("Expected Worker command"),
         }
@@ -130,8 +135,37 @@ mod tests {
         let cli = Cli::parse_from(args);
 
         match cli.command {
-            Commands::Worker { burst } => {
+            Commands::Worker { burst, progress } => {
                 assert!(burst);
+                assert!(!progress);
+            }
+            _ => panic!("Expected Worker command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_worker_progress_flag() {
+        let args = vec!["encode", "worker", "--progress"];
+        let cli = Cli::parse_from(args);
+
+        match cli.command {
+            Commands::Worker { burst, progress } => {
+                assert!(!burst);
+                assert!(progress);
+            }
+            _ => panic!("Expected Worker command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_worker_burst_and_progress() {
+        let args = vec!["encode", "worker", "--burst", "--progress"];
+        let cli = Cli::parse_from(args);
+
+        match cli.command {
+            Commands::Worker { burst, progress } => {
+                assert!(burst);
+                assert!(progress);
             }
             _ => panic!("Expected Worker command"),
         }

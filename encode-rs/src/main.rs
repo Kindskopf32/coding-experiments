@@ -59,8 +59,8 @@ async fn main() -> Result<()> {
 
             info!("Job added with ID: {}", job_id);
         }
-        Commands::Worker { burst } => {
-            run_worker(config, burst).await?;
+        Commands::Worker { burst, progress } => {
+            run_worker(config, burst, progress).await?;
         }
     }
 

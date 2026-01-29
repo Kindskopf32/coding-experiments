@@ -7,11 +7,14 @@ use crate::config::Config;
 use crate::db::Database;
 use crate::ffmpeg::FfmpegRunner;
 
-pub async fn run_worker(config: Config, burst_mode: bool) -> Result<()> {
-    info!("Starting worker (burst mode: {})", burst_mode);
+pub async fn run_worker(config: Config, burst_mode: bool, show_progress: bool) -> Result<()> {
+    info!(
+        "Starting worker (burst mode: {}, progress: {})",
+        burst_mode, show_progress
+    );
 
     let db = Database::connect(&config.database.url).await?;
-    let ffmpeg = FfmpegRunner::new(&config.ffmpeg.path);
+    let ffmpeg = FfmpegRunner::new(&config.ffmpeg.path, &config.ffmpeg.ffprobe_path);
 
     loop {
         // Check if we should exit in burst mode
@@ -32,7 +35,7 @@ pub async fn run_worker(config: Config, burst_mode: bool) -> Result<()> {
                 );
 
                 // Process the job
-                match ffmpeg.transcode(&job).await {
+                match ffmpeg.transcode(&job, show_progress).await {
                     Ok(_) => {
                         db.mark_done(job.id).await?;
                         info!("Job {} marked as done", job.id);

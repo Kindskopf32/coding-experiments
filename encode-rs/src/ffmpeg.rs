@@ -1,22 +1,31 @@
+use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 use std::path::Path;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::time::interval;
 use tracing::{debug, error, info};
 
 use crate::db::Job;
 
 pub struct FfmpegRunner {
     ffmpeg_path: String,
+    ffprobe_path: String,
 }
 
 impl FfmpegRunner {
-    pub fn new(ffmpeg_path: impl Into<String>) -> Self {
+    pub fn new(ffmpeg_path: impl Into<String>, ffprobe_path: impl Into<String>) -> Self {
         Self {
             ffmpeg_path: ffmpeg_path.into(),
+            ffprobe_path: ffprobe_path.into(),
         }
     }
 
-    pub async fn transcode(&self, job: &Job) -> Result<()> {
+    pub async fn transcode(&self, job: &Job, show_progress: bool) -> Result<()> {
         info!(
             "Starting transcoding job {}: {} -> {}",
             job.id, job.input_path, job.output_path
@@ -24,10 +33,7 @@ impl FfmpegRunner {
 
         // Validate input file exists
         if !Path::new(&job.input_path).exists() {
-            return Err(anyhow::anyhow!(
-                "Input file not found: {}",
-                job.input_path
-            ));
+            return Err(anyhow::anyhow!("Input file not found: {}", job.input_path));
         }
 
         // Ensure output directory exists
@@ -37,12 +43,16 @@ impl FfmpegRunner {
             })?;
         }
 
+        // Get video duration for progress calculation
+        let duration_ms = self.get_video_duration(&job.input_path).await;
+
         debug!(
-            "FFmpeg args: -i {} -c:v {} -preset {} -crf {} -c:a libopus -b:a 96k -y {}",
+            "FFmpeg args: -i {} -c:v {} -preset {} -crf {} -c:a libopus -b:a 96k -progress pipe:1 -y {}",
             job.input_path, job.video_codec, job.preset, job.crf, job.output_path
         );
 
-        let output = Command::new(&self.ffmpeg_path)
+        // Spawn FFmpeg with progress output
+        let mut child = Command::new(&self.ffmpeg_path)
             .arg("-i")
             .arg(&job.input_path)
             .arg("-c:v")
@@ -55,20 +65,154 @@ impl FfmpegRunner {
             .arg("libopus")
             .arg("-b:a")
             .arg("96k")
-            .arg("-y") // Overwrite output file
+            .arg("-progress")
+            .arg("pipe:1")
+            .arg("-y")
             .arg(&job.output_path)
-            .output()
-            .await
-            .with_context(|| format!("Failed to execute FFmpeg: {}", self.ffmpeg_path))?;
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("Failed to spawn FFmpeg: {}", self.ffmpeg_path))?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            error!("FFmpeg failed for job {}: {}", job.id, stderr);
-            return Err(anyhow::anyhow!("FFmpeg failed: {}", stderr));
+        let stdout = child
+            .stdout
+            .take()
+            .context("Failed to capture FFmpeg stdout")?;
+
+        // Shared state for progress tracking
+        let current_time_ms = Arc::new(AtomicU64::new(0));
+        let current_time_ms_reader = Arc::clone(&current_time_ms);
+
+        // Task to read FFmpeg progress output
+        let reader_task = tokio::spawn(async move {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+
+            while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(time_str) = line.strip_prefix("out_time_ms=")
+                    && let Ok(time_us) = time_str.parse::<u64>()
+                {
+                    // FFmpeg outputs time in microseconds, convert to milliseconds
+                    current_time_ms_reader.store(time_us / 1000, Ordering::Relaxed);
+                }
+            }
+        });
+
+        // Clone job ID for use in spawned task
+        let job_id = job.id;
+
+        // Task to log progress every 5 seconds (only if progress flag is enabled)
+        let progress_logger_task = if show_progress {
+            Some(tokio::spawn(async move {
+                let mut ticker = interval(Duration::from_secs(5));
+
+                loop {
+                    ticker.tick().await;
+
+                    let time_ms = current_time_ms.load(Ordering::Relaxed);
+
+                    if time_ms == 0 {
+                        info!("Job {} encoding: starting...", job_id);
+                        continue;
+                    }
+
+                    let elapsed = format_duration(time_ms);
+
+                    if let Some(total_ms) = duration_ms {
+                        let percentage = (time_ms as f64 / total_ms as f64) * 100.0;
+                        let total = format_duration(total_ms);
+                        info!(
+                            "Job {} encoding: {:.1}% complete ({} / {})",
+                            job_id, percentage, elapsed, total
+                        );
+                    } else {
+                        info!("Job {} encoding: {} elapsed", job_id, elapsed);
+                    }
+                }
+            }))
+        } else {
+            None
+        };
+
+        // Wait for FFmpeg to complete
+        let exit_status = child
+            .wait()
+            .await
+            .with_context(|| "Failed to wait for FFmpeg process")?;
+
+        // Stop the progress logger if it was started
+        if let Some(task) = progress_logger_task {
+            task.abort();
+            let _ = task.await;
+        }
+
+        // Stop the reader task
+        reader_task.abort();
+        let _ = reader_task.await;
+
+        if !exit_status.success() {
+            // Try to capture stderr for error message
+            let mut stderr_output = String::new();
+            if let Some(stderr) = child.stderr.take() {
+                let mut reader = BufReader::new(stderr);
+                use tokio::io::AsyncReadExt;
+                let mut buf = Vec::new();
+                if reader.read_to_end(&mut buf).await.is_ok() {
+                    stderr_output = String::from_utf8_lossy(&buf).to_string();
+                }
+            }
+
+            if stderr_output.is_empty() {
+                stderr_output = "FFmpeg exited with non-zero status".to_string();
+            }
+
+            error!("FFmpeg failed for job {}: {}", job.id, stderr_output);
+            return Err(anyhow::anyhow!("FFmpeg failed: {}", stderr_output));
         }
 
         info!("Job {} completed successfully", job.id);
         Ok(())
+    }
+
+    async fn get_video_duration(&self, input_path: &str) -> Option<u64> {
+        let output = Command::new(&self.ffprobe_path)
+            .arg("-v")
+            .arg("error")
+            .arg("-show_entries")
+            .arg("format=duration")
+            .arg("-of")
+            .arg("default=noprint_wrappers=1:nokey=1")
+            .arg(input_path)
+            .output()
+            .await;
+
+        match output {
+            Ok(output) if output.status.success() => {
+                let duration_str = String::from_utf8_lossy(&output.stdout);
+                duration_str
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .map(|seconds| (seconds * 1000.0) as u64)
+            }
+            _ => {
+                debug!("Failed to get video duration for {}", input_path);
+                None
+            }
+        }
+    }
+}
+
+fn format_duration(milliseconds: u64) -> String {
+    let total_seconds = milliseconds / 1000;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+
+    if hours > 0 {
+        format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+    } else {
+        format!("{:02}:{:02}", minutes, seconds)
     }
 }
 
@@ -96,23 +240,26 @@ mod tests {
 
     #[test]
     fn test_ffmpeg_runner_new() {
-        let runner = FfmpegRunner::new("/usr/bin/ffmpeg");
+        let runner = FfmpegRunner::new("/usr/bin/ffmpeg", "/usr/bin/ffprobe");
         assert_eq!(runner.ffmpeg_path, "/usr/bin/ffmpeg");
+        assert_eq!(runner.ffprobe_path, "/usr/bin/ffprobe");
     }
 
     #[test]
     fn test_ffmpeg_runner_new_from_string() {
         let path = String::from("/opt/ffmpeg");
-        let runner = FfmpegRunner::new(path);
+        let ffprobe = String::from("/opt/ffprobe");
+        let runner = FfmpegRunner::new(path, ffprobe);
         assert_eq!(runner.ffmpeg_path, "/opt/ffmpeg");
+        assert_eq!(runner.ffprobe_path, "/opt/ffprobe");
     }
 
     #[tokio::test]
     async fn test_transcode_missing_input_file() {
-        let runner = FfmpegRunner::new("ffmpeg");
+        let runner = FfmpegRunner::new("ffmpeg", "ffprobe");
         let job = create_test_job("/nonexistent/path/input.mp4", "/output.mp4");
 
-        let result = runner.transcode(&job).await;
+        let result = runner.transcode(&job, false).await;
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("Input file not found"));
@@ -121,7 +268,7 @@ mod tests {
     #[test]
     fn test_job_structure() {
         let job = create_test_job("/input.mp4", "/output.mp4");
-        
+
         assert_eq!(job.input_path, "/input.mp4");
         assert_eq!(job.output_path, "/output.mp4");
         assert_eq!(job.video_codec, "libx264");
@@ -140,5 +287,22 @@ mod tests {
         assert_eq!(job.video_codec, "libx265");
         assert_eq!(job.preset, "slow");
         assert_eq!(job.crf, 18);
+    }
+
+    #[test]
+    fn test_format_duration_seconds_only() {
+        assert_eq!(format_duration(45000), "00:45"); // 45 seconds
+        assert_eq!(format_duration(90000), "01:30"); // 1 minute 30 seconds
+    }
+
+    #[test]
+    fn test_format_duration_with_hours() {
+        assert_eq!(format_duration(3661000), "01:01:01"); // 1 hour 1 minute 1 second
+        assert_eq!(format_duration(7200000), "02:00:00"); // 2 hours
+    }
+
+    #[test]
+    fn test_format_duration_zero() {
+        assert_eq!(format_duration(0), "00:00");
     }
 }
