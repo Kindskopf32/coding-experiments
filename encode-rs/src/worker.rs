@@ -1,0 +1,66 @@
+use anyhow::Result;
+use std::time::Duration;
+use tokio::time::sleep;
+use tracing::{debug, info, warn};
+
+use crate::config::Config;
+use crate::db::Database;
+use crate::ffmpeg::FfmpegRunner;
+
+pub async fn run_worker(config: Config, burst_mode: bool) -> Result<()> {
+    info!("Starting worker (burst mode: {})", burst_mode);
+
+    let db = Database::connect(&config.database.url).await?;
+    let ffmpeg = FfmpegRunner::new(&config.ffmpeg.path);
+
+    loop {
+        // Check if we should exit in burst mode
+        if burst_mode {
+            let has_jobs = db.has_pending_jobs().await?;
+            if !has_jobs {
+                info!("No more pending jobs, exiting burst mode");
+                break;
+            }
+        }
+
+        // Try to claim a job
+        match db.claim_next_job().await? {
+            Some(job) => {
+                info!(
+                    "Processing job {}: {} -> {} (codec: {}, preset: {}, crf: {})",
+                    job.id, job.input_path, job.output_path, job.video_codec, job.preset, job.crf
+                );
+
+                // Process the job
+                match ffmpeg.transcode(&job).await {
+                    Ok(_) => {
+                        db.mark_done(job.id).await?;
+                        info!("Job {} marked as done", job.id);
+                    }
+                    Err(e) => {
+                        let error_msg = format!("{}", e);
+                        warn!("Job {} failed: {}", job.id, error_msg);
+                        db.mark_failed(job.id, &error_msg).await?;
+                    }
+                }
+            }
+            None => {
+                if burst_mode {
+                    // No jobs available, exit burst mode
+                    info!("No jobs available, exiting burst mode");
+                    break;
+                } else {
+                    // Normal mode: wait and poll again
+                    debug!(
+                        "No pending jobs, waiting {} seconds...",
+                        config.worker.poll_interval
+                    );
+                    sleep(Duration::from_secs(config.worker.poll_interval)).await;
+                }
+            }
+        }
+    }
+
+    info!("Worker shutting down");
+    Ok(())
+}
