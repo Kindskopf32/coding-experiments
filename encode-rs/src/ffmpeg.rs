@@ -38,7 +38,7 @@ impl FfmpegRunner {
         }
 
         debug!(
-            "FFmpeg args: -i {} -c:v {} -preset {} -crf {} -y {}",
+            "FFmpeg args: -i {} -c:v {} -preset {} -crf {} -c:a libopus -b:a 96k -y {}",
             job.input_path, job.video_codec, job.preset, job.crf, job.output_path
         );
 
@@ -51,6 +51,10 @@ impl FfmpegRunner {
             .arg(&job.preset)
             .arg("-crf")
             .arg(job.crf.to_string())
+            .arg("-c:a")
+            .arg("libopus")
+            .arg("-b:a")
+            .arg("96k")
             .arg("-y") // Overwrite output file
             .arg(&job.output_path)
             .output()
