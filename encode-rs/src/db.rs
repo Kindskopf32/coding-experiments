@@ -55,7 +55,7 @@ impl Database {
         let row = sqlx::query(
             r#"
             INSERT INTO jobs (input_path, output_path, video_codec, preset, crf)
-            VALUES ($1, $2, COALESCE($3, 'libx264'), COALESCE($4, 'medium'), COALESCE($5, 23))
+            VALUES ($1, $2, COALESCE($3, 'libsvtav1'), COALESCE($4, '4'), COALESCE($5, 28))
             RETURNING id
             "#,
         )
