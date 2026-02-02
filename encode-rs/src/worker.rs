@@ -16,6 +16,14 @@ pub async fn run_worker(config: Config, burst_mode: bool, show_progress: bool) -
     let db = Database::connect(&config.database.url).await?;
     let ffmpeg = FfmpegRunner::new(&config.ffmpeg.path, &config.ffmpeg.ffprobe_path);
 
+    // Cleanup old done jobs at startup
+    let deleted = db
+        .cleanup_old_done_jobs(config.worker.cleanup_done_jobs_after as i64)
+        .await?;
+    if deleted > 0 {
+        info!("Cleaned up {} old done job(s) at startup", deleted);
+    }
+
     loop {
         // Check if we should exit in burst mode
         if burst_mode {
@@ -29,6 +37,14 @@ pub async fn run_worker(config: Config, burst_mode: bool, show_progress: bool) -
         // Try to claim a job
         match db.claim_next_job().await? {
             Some(job) => {
+                // Cleanup old done jobs after claiming a new job
+                let deleted = db
+                    .cleanup_old_done_jobs(config.worker.cleanup_done_jobs_after as i64)
+                    .await?;
+                if deleted > 0 {
+                    info!("Cleaned up {} old done job(s)", deleted);
+                }
+
                 info!(
                     "Processing job {}: {} -> {} (codec: {}, preset: {}, crf: {})",
                     job.id, job.input_path, job.output_path, job.video_codec, job.preset, job.crf

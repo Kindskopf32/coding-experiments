@@ -171,6 +171,21 @@ impl Database {
         let has_jobs: bool = row.try_get("has_jobs")?;
         Ok(has_jobs)
     }
+
+    pub async fn cleanup_old_done_jobs(&self, age_seconds: i64) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM jobs
+            WHERE status = 'done'
+              AND completed_at < NOW() - INTERVAL '1 second' * $1
+            "#,
+        )
+        .bind(age_seconds)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
 }
 
 #[cfg(test)]

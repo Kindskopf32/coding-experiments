@@ -28,6 +28,8 @@ pub struct FfmpegConfig {
 pub struct WorkerConfig {
     #[serde(rename = "poll_interval_seconds")]
     pub poll_interval: u64,
+    #[serde(rename = "cleanup_done_jobs_after_seconds")]
+    pub cleanup_done_jobs_after: u64,
 }
 
 impl Config {
@@ -62,6 +64,7 @@ default_crf = 23
 
 [worker]
 poll_interval_seconds = 5
+cleanup_done_jobs_after_seconds = 300
 "#;
 
         let config = Config::from_str(toml_content).unwrap();
@@ -76,6 +79,7 @@ poll_interval_seconds = 5
         assert_eq!(config.ffmpeg.default_preset, "medium");
         assert_eq!(config.ffmpeg.default_crf, 23);
         assert_eq!(config.worker.poll_interval, 5);
+        assert_eq!(config.worker.cleanup_done_jobs_after, 300);
     }
 
     #[test]
@@ -93,6 +97,7 @@ default_crf = 18
 
 [worker]
 poll_interval_seconds = 30
+cleanup_done_jobs_after_seconds = 600
 "#;
 
         let config = Config::from_str(toml_content).unwrap();
@@ -107,6 +112,7 @@ poll_interval_seconds = 30
         assert_eq!(config.ffmpeg.default_preset, "slow");
         assert_eq!(config.ffmpeg.default_crf, 18);
         assert_eq!(config.worker.poll_interval, 30);
+        assert_eq!(config.worker.cleanup_done_jobs_after, 600);
     }
 
     #[test]
