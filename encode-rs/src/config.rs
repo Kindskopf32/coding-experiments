@@ -1,11 +1,12 @@
 use anyhow::Result;
 use serde::Deserialize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub database: DatabaseConfig,
+    #[cfg(test)]
     pub ffmpeg: FfmpegConfig,
     pub worker: WorkerConfig,
 }
@@ -15,10 +16,9 @@ pub struct DatabaseConfig {
     pub url: String,
 }
 
+#[cfg(test)]
 #[derive(Debug, Deserialize)]
 pub struct FfmpegConfig {
-    pub path: String,
-    pub ffprobe_path: String,
     pub default_codec: String,
     pub default_preset: String,
     pub default_crf: i32,
@@ -30,6 +30,8 @@ pub struct WorkerConfig {
     pub poll_interval: u64,
     #[serde(rename = "cleanup_done_jobs_after_seconds")]
     pub cleanup_done_jobs_after: u64,
+    /// Working directory to prepend to input/output paths
+    pub workdir: Option<PathBuf>,
 }
 
 impl Config {
@@ -56,8 +58,6 @@ mod tests {
 url = "postgres://user:pass@localhost/test_db"
 
 [ffmpeg]
-path = "/usr/bin/ffmpeg"
-ffprobe_path = "/usr/bin/ffprobe"
 default_codec = "libx264"
 default_preset = "medium"
 default_crf = 23
@@ -65,6 +65,7 @@ default_crf = 23
 [worker]
 poll_interval_seconds = 5
 cleanup_done_jobs_after_seconds = 300
+workdir = "/media"
 "#;
 
         let config = Config::from_str(toml_content).unwrap();
@@ -73,13 +74,12 @@ cleanup_done_jobs_after_seconds = 300
             config.database.url,
             "postgres://user:pass@localhost/test_db"
         );
-        assert_eq!(config.ffmpeg.path, "/usr/bin/ffmpeg");
-        assert_eq!(config.ffmpeg.ffprobe_path, "/usr/bin/ffprobe");
         assert_eq!(config.ffmpeg.default_codec, "libx264");
         assert_eq!(config.ffmpeg.default_preset, "medium");
         assert_eq!(config.ffmpeg.default_crf, 23);
         assert_eq!(config.worker.poll_interval, 5);
         assert_eq!(config.worker.cleanup_done_jobs_after, 300);
+        assert_eq!(config.worker.workdir, Some(PathBuf::from("/media")));
     }
 
     #[test]
@@ -89,8 +89,6 @@ cleanup_done_jobs_after_seconds = 300
 url = "postgres://admin:secret@db.example.com/production"
 
 [ffmpeg]
-path = "/opt/ffmpeg/bin/ffmpeg"
-ffprobe_path = "/opt/ffmpeg/bin/ffprobe"
 default_codec = "libx265"
 default_preset = "slow"
 default_crf = 18
@@ -106,8 +104,6 @@ cleanup_done_jobs_after_seconds = 600
             config.database.url,
             "postgres://admin:secret@db.example.com/production"
         );
-        assert_eq!(config.ffmpeg.path, "/opt/ffmpeg/bin/ffmpeg");
-        assert_eq!(config.ffmpeg.ffprobe_path, "/opt/ffmpeg/bin/ffprobe");
         assert_eq!(config.ffmpeg.default_codec, "libx265");
         assert_eq!(config.ffmpeg.default_preset, "slow");
         assert_eq!(config.ffmpeg.default_crf, 18);

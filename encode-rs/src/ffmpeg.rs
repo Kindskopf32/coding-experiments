@@ -1,10 +1,10 @@
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use std::path::Path;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::interval;
@@ -12,49 +12,103 @@ use tracing::{debug, error, info};
 
 use crate::db::Job;
 
-pub struct FfmpegRunner {
-    ffmpeg_path: String,
-    ffprobe_path: String,
-}
+const FFMPEG_CMD: &str = "ffmpeg";
+const FFPROBE_CMD: &str = "ffprobe";
+
+pub struct FfmpegRunner;
 
 impl FfmpegRunner {
-    pub fn new(ffmpeg_path: impl Into<String>, ffprobe_path: impl Into<String>) -> Self {
-        Self {
-            ffmpeg_path: ffmpeg_path.into(),
-            ffprobe_path: ffprobe_path.into(),
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub async fn validate_binaries() -> Result<()> {
+        Self::check_binary(FFMPEG_CMD).await?;
+        Self::check_binary(FFPROBE_CMD).await?;
+        Ok(())
+    }
+
+    async fn check_binary(binary: &str) -> Result<()> {
+        let output = Command::new("which")
+            .arg(binary)
+            .output()
+            .await
+            .with_context(|| format!("Failed to check for {} binary", binary))?;
+
+        if !output.status.success() {
+            return Err(anyhow::anyhow!(
+                "{} not found in PATH. Please ensure {} is installed and available.",
+                binary,
+                binary
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Resolves a path against the workdir if one is configured.
+    /// If the path is absolute or no workdir is set, returns the path as-is.
+    fn resolve_path(path: &str, workdir: Option<&Path>) -> PathBuf {
+        if let Some(workdir) = workdir {
+            let path_buf = PathBuf::from(path);
+            if path_buf.is_absolute() {
+                path_buf
+            } else {
+                workdir.join(path)
+            }
+        } else {
+            PathBuf::from(path)
         }
     }
 
-    pub async fn transcode(&self, job: &Job, show_progress: bool) -> Result<()> {
+    pub async fn transcode(
+        &self,
+        job: &Job,
+        show_progress: bool,
+        workdir: Option<&Path>,
+    ) -> Result<()> {
+        // Resolve input/output paths against workdir if provided
+        let input_path = Self::resolve_path(&job.input_path, workdir);
+        let output_path = Self::resolve_path(&job.output_path, workdir);
+
         info!(
             "Starting transcoding job {}: {} -> {}",
-            job.id, job.input_path, job.output_path
+            job.id,
+            input_path.display(),
+            output_path.display()
         );
 
         // Validate input file exists
-        if !Path::new(&job.input_path).exists() {
-            return Err(anyhow::anyhow!("Input file not found: {}", job.input_path));
+        if !input_path.exists() {
+            return Err(anyhow::anyhow!(
+                "Input file not found: {}",
+                input_path.display()
+            ));
         }
 
         // Ensure output directory exists
-        if let Some(parent) = Path::new(&job.output_path).parent() {
+        if let Some(parent) = output_path.parent() {
             tokio::fs::create_dir_all(parent).await.with_context(|| {
                 format!("Failed to create output directory: {}", parent.display())
             })?;
         }
 
         // Get video duration for progress calculation
-        let duration_ms = self.get_video_duration(&job.input_path).await;
+        let duration_ms = self.get_video_duration(&input_path.to_string_lossy()).await;
 
         debug!(
             "FFmpeg args: -i {} -c:v {} -preset {} -crf {} -c:a libopus -b:a 96k -progress pipe:1 -y {}",
-            job.input_path, job.video_codec, job.preset, job.crf, job.output_path
+            input_path.display(),
+            job.video_codec,
+            job.preset,
+            job.crf,
+            output_path.display()
         );
 
         // Spawn FFmpeg with progress output
-        let mut child = Command::new(&self.ffmpeg_path)
+        let mut child = Command::new(FFMPEG_CMD)
             .arg("-i")
-            .arg(&job.input_path)
+            .arg(&input_path)
             .arg("-c:v")
             .arg(&job.video_codec)
             .arg("-preset")
@@ -68,11 +122,11 @@ impl FfmpegRunner {
             .arg("-progress")
             .arg("pipe:1")
             .arg("-y")
-            .arg(&job.output_path)
+            .arg(&output_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .with_context(|| format!("Failed to spawn FFmpeg: {}", self.ffmpeg_path))?;
+            .with_context(|| format!("Failed to spawn FFmpeg: {}", FFMPEG_CMD))?;
 
         let stdout = child
             .stdout
@@ -175,7 +229,7 @@ impl FfmpegRunner {
     }
 
     async fn get_video_duration(&self, input_path: &str) -> Option<u64> {
-        let output = Command::new(&self.ffprobe_path)
+        let output = Command::new(FFPROBE_CMD)
             .arg("-v")
             .arg("error")
             .arg("-show_entries")
@@ -240,26 +294,16 @@ mod tests {
 
     #[test]
     fn test_ffmpeg_runner_new() {
-        let runner = FfmpegRunner::new("/usr/bin/ffmpeg", "/usr/bin/ffprobe");
-        assert_eq!(runner.ffmpeg_path, "/usr/bin/ffmpeg");
-        assert_eq!(runner.ffprobe_path, "/usr/bin/ffprobe");
-    }
-
-    #[test]
-    fn test_ffmpeg_runner_new_from_string() {
-        let path = String::from("/opt/ffmpeg");
-        let ffprobe = String::from("/opt/ffprobe");
-        let runner = FfmpegRunner::new(path, ffprobe);
-        assert_eq!(runner.ffmpeg_path, "/opt/ffmpeg");
-        assert_eq!(runner.ffprobe_path, "/opt/ffprobe");
+        let _runner = FfmpegRunner::new();
+        // FfmpegRunner now uses hardcoded commands from PATH
     }
 
     #[tokio::test]
     async fn test_transcode_missing_input_file() {
-        let runner = FfmpegRunner::new("ffmpeg", "ffprobe");
+        let runner = FfmpegRunner::new();
         let job = create_test_job("/nonexistent/path/input.mp4", "/output.mp4");
 
-        let result = runner.transcode(&job, false).await;
+        let result = runner.transcode(&job, false, None).await;
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("Input file not found"));

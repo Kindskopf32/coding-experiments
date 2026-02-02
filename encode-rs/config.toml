@@ -1,11 +1,6 @@
 [database]
 url = "postgresql://localhost/encode"
 
-[ffmpeg]
-path = "ffmpeg"
-default_codec = "libx264"
-default_preset = "medium"
-default_crf = 23
-
 [worker]
 poll_interval_seconds = 5
+# workdir = "/media"
