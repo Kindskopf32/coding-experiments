@@ -32,6 +32,9 @@ pub struct WorkerConfig {
     pub cleanup_done_jobs_after: u64,
     /// Working directory to prepend to input/output paths
     pub workdir: Option<PathBuf>,
+    /// Temporary directory for encoding (optional)
+    /// When set, files are encoded here first, then copied to output
+    pub tmp_dir: Option<PathBuf>,
 }
 
 impl Config {

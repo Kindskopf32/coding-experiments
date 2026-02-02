@@ -76,7 +76,15 @@ pub async fn run_worker(config: Config, burst_mode: bool, show_progress: bool) -
                 );
 
                 // Process the job
-                match ffmpeg.transcode(&job, show_progress, workdir).await {
+                match ffmpeg
+                    .transcode(
+                        &job,
+                        show_progress,
+                        workdir,
+                        config.worker.tmp_dir.as_deref(),
+                    )
+                    .await
+                {
                     Ok(_) => {
                         db.mark_done(job.id).await?;
                         info!("Job {} marked as done", job.id);

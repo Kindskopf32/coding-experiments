@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use tokio::fs;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::interval;
@@ -66,6 +67,7 @@ impl FfmpegRunner {
         job: &Job,
         show_progress: bool,
         workdir: Option<&Path>,
+        tmp_dir: Option<&Path>,
     ) -> Result<()> {
         // Resolve input/output paths against workdir if provided
         let input_path = Self::resolve_path(&job.input_path, workdir);
@@ -93,6 +95,33 @@ impl FfmpegRunner {
             })?;
         }
 
+        // Determine encoding target and whether we're using temp storage
+        let (encoding_target, using_temp) = if let Some(tmp_dir) = tmp_dir {
+            // Create tmp_dir if needed
+            fs::create_dir_all(tmp_dir).await.with_context(|| {
+                format!("Failed to create temp directory: {}", tmp_dir.display())
+            })?;
+
+            // Generate temp file path with job ID and proper extension
+            let extension = output_path.extension().map(|e| e.to_string_lossy());
+            let temp_filename = if let Some(ext) = extension {
+                format!("encode_{}.{}", job.id, ext)
+            } else {
+                format!("encode_{}", job.id)
+            };
+            let temp_path = tmp_dir.join(&temp_filename);
+
+            info!(
+                "Using temp storage: encoding to {} first, then copying to {}",
+                temp_path.display(),
+                output_path.display()
+            );
+
+            (temp_path, true)
+        } else {
+            (output_path.clone(), false)
+        };
+
         // Get video duration for progress calculation
         let duration_ms = self.get_video_duration(&input_path.to_string_lossy()).await;
 
@@ -102,7 +131,7 @@ impl FfmpegRunner {
             job.video_codec,
             job.preset,
             job.crf,
-            output_path.display()
+            encoding_target.display()
         );
 
         // Spawn FFmpeg with progress output
@@ -122,7 +151,7 @@ impl FfmpegRunner {
             .arg("-progress")
             .arg("pipe:1")
             .arg("-y")
-            .arg(&output_path)
+            .arg(&encoding_target)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -221,7 +250,47 @@ impl FfmpegRunner {
             }
 
             error!("FFmpeg failed for job {}: {}", job.id, stderr_output);
+
+            // If using temp storage, keep the temp file for debugging
+            if using_temp {
+                info!(
+                    "Job {}: Temp file kept for debugging at: {}",
+                    job.id,
+                    encoding_target.display()
+                );
+            }
+
             return Err(anyhow::anyhow!("FFmpeg failed: {}", stderr_output));
+        }
+
+        // If using temp storage, copy to final output and clean up
+        if using_temp {
+            info!(
+                "Job {}: Copying from {} to {}",
+                job.id,
+                encoding_target.display(),
+                output_path.display()
+            );
+
+            fs::copy(&encoding_target, &output_path)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to copy file from {} to {}",
+                        encoding_target.display(),
+                        output_path.display()
+                    )
+                })?;
+
+            info!(
+                "Job {}: Removing temp file {}",
+                job.id,
+                encoding_target.display()
+            );
+
+            fs::remove_file(&encoding_target).await.with_context(|| {
+                format!("Failed to remove temp file: {}", encoding_target.display())
+            })?;
         }
 
         info!("Job {} completed successfully", job.id);
@@ -303,7 +372,7 @@ mod tests {
         let runner = FfmpegRunner::new();
         let job = create_test_job("/nonexistent/path/input.mp4", "/output.mp4");
 
-        let result = runner.transcode(&job, false, None).await;
+        let result = runner.transcode(&job, false, None, None).await;
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("Input file not found"));
