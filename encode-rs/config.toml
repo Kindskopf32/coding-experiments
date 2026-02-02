@@ -4,3 +4,5 @@ url = "postgresql://localhost/encode"
 [worker]
 poll_interval_seconds = 5
 # workdir = "/media"
+tmp_dir = "/tmp/max"
+cleanup_done_jobs_after_seconds = 30
