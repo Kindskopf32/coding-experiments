@@ -5,4 +5,3 @@ edition = "2024"
 
 [dependencies]
 kiss3d = "0.35"
-nalgebra = "0.32"
