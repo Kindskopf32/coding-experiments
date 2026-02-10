@@ -74,3 +74,21 @@ This is the json response
 }
 ```
 
+## Getting the diff from gitea
+
+This curl command gets the diff
+
+```bash
+curl -X GET -H "accept: application/json" -H "Authorization: token $GITEA_TOKEN" https://gitea.mavolk.de/api/v1/repos/$USER/$REPO/pulls/PR_NR.diff
+```
+
+## Adding a comment to a pr on gitea
+
+This curl command adds a comment to a pull request
+
+```bash
+curl -X POST -H "accept: application/json" -H "Authorization: token $GITEA_TOKEN" https://gitea.mavolk.de/api/v1/repos/$USER/$REPO/issues/$PR_NR/comments -d '{
+  "body": "$COMMENT_TEXT"
+}
+```
+
