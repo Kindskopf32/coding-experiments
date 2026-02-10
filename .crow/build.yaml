@@ -1,0 +1,13 @@
+---
+name: hello-world
+
+when:
+  - event: push
+
+steps:
+  - name: test
+    image: alpine
+    commands:
+      - echo "Hello from Crow CI!"
+      - apk add --no-cache bash
+      - echo "${CI_REPO}"
