@@ -6,7 +6,7 @@ when:
 
 steps:
   - name: test
-    image: debian
+    image: alpine
     commands: |
       echo "Hello from Crow CI"
       echo "${CI_REPO}"
