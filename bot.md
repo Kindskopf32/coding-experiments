@@ -79,7 +79,7 @@ This is the json response
 This curl command gets the diff
 
 ```bash
-curl -X GET -H "accept: application/json" -H "Authorization: token $GITEA_TOKEN" https://gitea.mavolk.de/api/v1/repos/$USER/$REPO/pulls/PR_NR.diff
+curl -X GET -H "accept: application/json" -H "Authorization: token $GITEA_TOKEN" https://gitea.mavolk.de/api/v1/repos/$USER/$REPO/pulls/$PR_NR.diff
 ```
 
 ## Adding a comment to a pr on gitea
