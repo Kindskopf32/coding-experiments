@@ -1,8 +1,8 @@
 ---
 name: hello-world
 
-#when:
-#  - event: push
+when:
+  - event: manual
 
 steps:
   - name: test
