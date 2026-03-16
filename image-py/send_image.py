@@ -88,7 +88,7 @@ class ImageToTextClient:
 
 def main():
     # Setup configuration
-    API_KEY = "Nothing"
+    API_KEY = "removed"
     BASE_URL = "http://bazzite-nvidia.host.mavolk.de:8080/v1"  # Replace with your endpoint
     MODEL = "unsloth/Qwen3.5-35B-A3B-GGUF"
 
